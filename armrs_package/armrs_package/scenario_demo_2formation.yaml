@@ -1,0 +1,27 @@
+
+robot_ID: [1, 2, 3, 4] # unique ID for each robot
+
+formation:
+  1: 
+    member: [1, 2] # dictate the ordering of the offset and distance
+    # Initial position of robots: X-pos, Y-pos, theta (in rad)
+    init_pos: [ 
+      [ 0.,  1.8, 0.], 
+      [ 0.,  1.2, 0.]
+    ] 
+    adjacency_mat: [ 
+      [0, 1],
+      [1, 0],
+    ] 
+
+  2: 
+    member: [3, 4] # dictate the ordering of the offset and distance
+    # Initial position of robots: X-pos, Y-pos, theta (in rad)
+    init_pos: [ 
+      [ 0.,  -0.2, 0.], 
+      [ 0.,  -0.8, 0.]
+    ] 
+    adjacency_mat: [ 
+      [0, 1],
+      [1, 0],
+    ] 

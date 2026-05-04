@@ -1,0 +1,14 @@
+Ts: 0.02 # Time sampling in second
+t_max: 50 # length of simulation time in second
+
+# look ahead distance from the center of robot
+look_ahead_ell: 0.15 
+
+LIDAR_Ts : 0.2 # Time sampling for LIDAR data
+
+field : [-0.2, 7, -1., 7.2] # [xmin, xmax, ymin, ymax]
+
+obstacles:
+  lower_box: [
+    [3.5, 3., 0], [4.5, 3., 0], [4.5, .5, 0], [3.5, .5, 0], [3.5, 3., 0]
+  ]
