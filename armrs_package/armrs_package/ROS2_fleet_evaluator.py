@@ -141,57 +141,61 @@ class Computation(Node):
     
     
     def calculate_voronoi(self):
-        boundary = np.array([
-            [-0.2, -1.0], 
-            [-0.2, 7.2], 
-            [7.0, 7.2], 
-            [7.0, -1.0]
-        ])
-
-        bound_poly: ShapelyPolygon = ShapelyPolygon(boundary)
+        #Define Boundary
+        boundary_coords = [[-0.2, -1.0], [-0.2, 7.2], [7.0, 7.2], [7.0, -1.0]]
+        bound_poly = ShapelyPolygon(boundary_coords)
         
-        points: np.array = np.array([])
+        extension_box = bound_poly.buffer(2.0).envelope 
 
+        active_robot_ids = []
         pos_list = []
-        for data in self.robot_est.values():
-            if data.pos is None:
-                continue
-            pos_list.append(data.pos)
+
+        for robot_id, data in self.robot_est.items():
+            if data.pos is not None:
+                pos_list.append([float(data.pos[0]), float(data.pos[1])])
+                active_robot_ids.append(robot_id)
+
+        if len(pos_list) < 2:
+            return
 
         points = np.asarray(pos_list, dtype=np.float32)
-        
-        vor = {}
-        msg: VoronoiData = VoronoiData()
+        msg = VoronoiData()
 
-        vor_ori = shapely.voronoi_polygons(MultiPoint(points), extend_to=bound_poly, ordered=True)
-        #for i, vor_poly in enumerate(vor_ori.geoms):
-        #    vor[i] = vor_poly.intersection(bound_poly)
-        #    msg.cells.append(vor_poly.intersection(bound_poly))
-        #    msg.ids.append(i)
-        
-        for i, vor_poly in enumerate(vor_ori.geoms):
-            # 3. Intersect and keep valid
-            cell_shape = vor_poly.intersection(bound_poly)
-            
-            # 4. CONVERT Shapely Polygon -> ROS geometry_msgs/Polygon
-            ros_poly = Polygon()
-            
-            # Check if intersection produced a valid polygon with an exterior
-            if hasattr(cell_shape, 'exterior'):
-                for x, y in cell_shape.exterior.coords:
-                    p = Point32()
-                    p.x = float(x)
-                    p.y = float(y)
-                    p.z = 0.0
-                    ros_poly.points.append(p)
-            
-            msg.cells.append(ros_poly)
-            msg.ids.append(i)
-        
-        if len(pos_list) < 4:
-            return
-        self.voronoi_pub.publish(msg)
-        
+        try:
+            #Generate Voronoi extended to the larger box
+            vor_ori = shapely.voronoi_polygons(
+                MultiPoint(points), 
+                extend_to=extension_box, 
+                ordered=True
+            )
+
+            #Process each cell
+            for i, vor_poly in enumerate(vor_ori.geoms):
+                cell_shape = vor_poly.intersection(bound_poly)
+                
+                if cell_shape.is_empty:
+                    continue
+                ros_poly = Polygon()
+                if hasattr(cell_shape, 'exterior'):
+                    for x, y in cell_shape.exterior.coords:
+                        ros_poly.points.append(Point32(x=float(x), y=float(y), z=0.0))
+                
+                robot_id = active_robot_ids[i]
+                msg.ids.append(robot_id)
+                msg.cells.append(ros_poly)
+
+                #Calculate Centroid
+                centroid = cell_shape.centroid
+                msg.target_x.append(float(centroid.x))
+                msg.target_y.append(float(centroid.y))
+
+                self.robot_est[robot_id].target_pos_x = float(centroid.x)
+                self.robot_est[robot_id].target_pos_y = float(centroid.y)
+
+            self.voronoi_pub.publish(msg)
+
+        except Exception as e:
+            self.get_logger().error(f"Voronoi calculation failed: {e}")
 
 
 

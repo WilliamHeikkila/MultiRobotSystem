@@ -4,7 +4,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import Twist, PoseStamped
 from sensor_msgs.msg import LaserScan
-from armrs_msgs.msg import StateExchange
+from armrs_msgs.msg import StateExchange, VoronoiData
 
 from functools import partial
 
@@ -100,6 +100,10 @@ class Computation(Node):
         self.it = 0
         self.check_t = self.time()
 
+
+        #VOROINOI
+        self.voronoi_sub = self.create_subscription(VoronoiData, "voronoi_data", self.voronoi_callback, 1)
+
     def time(self):
         """Returns the current time in seconds."""
         return self.get_clock().now().nanoseconds / 1e9
@@ -185,6 +189,10 @@ class Computation(Node):
             # BEFORE calculating control input
 
             # Controller part
+
+            #self.get_logger().info("x "+str(self.robot_est_i.target_point_x))
+            #self.get_logger().info("y "+str(self.robot_est_i.target_point_y))
+
             vel_command = self.robot_cont_i.compute_control_input(self.robot_est_i)
             lin_vel, ang_vel = self.robot_cont_i.si_to_unicycle(vel_command, 
                                                                     self.robot_est_i.theta, 
@@ -198,6 +206,15 @@ class Computation(Node):
             # Exchange the robot's state - Publish the data
             state_msg = self.construct_msgs_state(self.state_i, self.robot_est_i) 
             self.state_pubs_i.publish( state_msg )
+    
+    def voronoi_callback(self, msg: VoronoiData):
+        i: int = 0
+        for id in msg.ids:
+            if id == self.robot_est_i.robot_ID:
+                self.robot_est_i.target_point_x = msg.target_x[i]
+                self.robot_est_i.target_point_y = msg.target_y[i]
+                break
+            i += 1
 
 
 def main(args=None):

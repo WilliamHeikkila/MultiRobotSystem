@@ -2,6 +2,7 @@ from .nebosim_core.range_sensing import calc_detected_pos
 from qpsolvers import Problem, solve_problem
 
 import numpy as np
+import math
 
 def calc_lahead_pos(pos, theta, ell):
     return np.array([pos[0] + ell*np.cos(theta), 
@@ -19,6 +20,8 @@ class Estimation():
         self.range_data = None
         self.range_pos = None
         self.obs_pos = None
+        self.target_point_x: float = 0.0
+        self.target_point_y: float = 0.0
 
         self.Ts = param_dict.Ts
         self.look_ahead_dist = param_dict.ell
@@ -89,16 +92,27 @@ class Controller():
 
 
 
-    def compute_control_input(self, estimation_dict):
+    def compute_control_input(self, estimation_dict: Estimation):
         current_pos = estimation_dict.lahead_pos
 
         ## ------------------------------------
         # CONTROLLER CALCULATION
         ## ------------------------------------
         # Compute nominal control # TODO
-        vx = 0.1
-        vy = 0.1
-        u_nom = np.array([vx, vy, 0])
+        dir_x = estimation_dict.target_point_x - estimation_dict.pos[0]
+        dir_y = estimation_dict.target_point_y - estimation_dict.pos[1]
+
+        magnitude = math.sqrt(dir_x**2 + dir_y**2)
+        unit_x = 0.0
+        unit_y = 0.0
+        if magnitude != 0.0:
+            unit_x = dir_x / (magnitude * 4.0)
+            unit_y = dir_y / (magnitude * 4.0)
+        
+        vx = unit_x
+        vy = unit_y
+
+        u_nom = np.array([vx, vy, 0.0])
 
         # Implement safety controller # TODO
         vel_command = u_nom

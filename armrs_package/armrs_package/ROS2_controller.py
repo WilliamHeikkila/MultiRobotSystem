@@ -159,6 +159,8 @@ class Computation(Node):
                 # BEFORE calculating control input
 
                 # Controller part
+                ##NOT THIS ONE PAL
+
                 vel_command = self.robot_cont[id].compute_control_input(self.robot_est[id])
                 lin_vel, ang_vel = self.robot_cont[id].si_to_unicycle(vel_command, 
                                                                     self.robot_est[id].theta, 
