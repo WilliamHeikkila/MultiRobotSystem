@@ -3,13 +3,18 @@ import rclpy, signal
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import PoseStamped
-from armrs_msgs.msg import StateExchange, FleetInformation
+from geometry_msgs.msg import PoseStamped, Polygon, Point32
+from armrs_msgs.msg import VoronoiData, StateExchange, FleetInformation 
 
 from functools import partial
 
 import os
 import numpy as np
+import shapely
+from shapely.geometry import MultiPoint, Point
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.plotting import plot_polygon
+
 from .yaml_loader import ParamLoader, ScenarioLoader
 from .visualizer import PlotVisualizer
 from .main_controller import Estimation
@@ -17,6 +22,7 @@ from .cent_evaluator import CentralizedEvaluator
 from .nebosim_core.range_sensing import calc_detected_pos
 
 from . import ROS2_py_common as ros2py
+
 
 class Computation(Node):
     def __init__(self, ROS_NODE_NAME):
@@ -27,8 +33,8 @@ class Computation(Node):
         self.declare_parameter('scenario_yaml', '')
         param_file = self.get_parameter('param_yaml').get_parameter_value().string_value
         scenario_file = self.get_parameter('scenario_yaml').get_parameter_value().string_value
-        # self.get_logger().info('Reading param yaml %s' % param_file)
-        # self.get_logger().info('Reading scenario yaml %s' % scenario_file)
+        self.get_logger().info('Reading param yaml %s' % param_file)
+        self.get_logger().info('Reading scenario yaml %s' % scenario_file)
 
         # Load parameters from yaml file
         param = ParamLoader(param_file)
@@ -84,6 +90,11 @@ class Computation(Node):
         self.start_t = self.time()
         self.check_t = self.time()
 
+        #VOVORON
+        self.voronoi_pub = self.create_publisher(VoronoiData, "voronoi_data", 1)
+
+        self.list_of_robot_id_voronoi: list = scenario.list_robot_ID
+
     def time(self):
         """Returns the current time in seconds."""
         return self.get_clock().now().nanoseconds / 1e9
@@ -92,6 +103,8 @@ class Computation(Node):
         pos, yaw = ros2py.get_pos_yaw(msg)
         # update to estimation
         self.robot_est[index].update_state_reading( np.array([pos.x, pos.y, 0]), yaw )
+
+        self.calculate_voronoi()
 
     def state_callback(self, msg, index):
         pass
@@ -123,6 +136,64 @@ class Computation(Node):
         for f_id in self.evaluator.form_ids:
             ros2py.cent_evaluator_to_msg(f_id, self.fleet_msg[f_id], self.evaluator)
             self.fleet_pubs[f_id].publish( self.fleet_msg[f_id] )
+        
+        self.calculate_voronoi()
+    
+    
+    def calculate_voronoi(self):
+        boundary = np.array([
+            [-0.2, -1.0], 
+            [-0.2, 7.2], 
+            [7.0, 7.2], 
+            [7.0, -1.0]
+        ])
+
+        bound_poly: ShapelyPolygon = ShapelyPolygon(boundary)
+        
+        points: np.array = np.array([])
+
+        pos_list = []
+        for data in self.robot_est.values():
+            if data.pos is None:
+                continue
+            pos_list.append(data.pos)
+
+        points = np.asarray(pos_list, dtype=np.float32)
+        
+        vor = {}
+        msg: VoronoiData = VoronoiData()
+
+        vor_ori = shapely.voronoi_polygons(MultiPoint(points), extend_to=bound_poly, ordered=True)
+        #for i, vor_poly in enumerate(vor_ori.geoms):
+        #    vor[i] = vor_poly.intersection(bound_poly)
+        #    msg.cells.append(vor_poly.intersection(bound_poly))
+        #    msg.ids.append(i)
+        
+        for i, vor_poly in enumerate(vor_ori.geoms):
+            # 3. Intersect and keep valid
+            cell_shape = vor_poly.intersection(bound_poly)
+            
+            # 4. CONVERT Shapely Polygon -> ROS geometry_msgs/Polygon
+            ros_poly = Polygon()
+            
+            # Check if intersection produced a valid polygon with an exterior
+            if hasattr(cell_shape, 'exterior'):
+                for x, y in cell_shape.exterior.coords:
+                    p = Point32()
+                    p.x = float(x)
+                    p.y = float(y)
+                    p.z = 0.0
+                    ros_poly.points.append(p)
+            
+            msg.cells.append(ros_poly)
+            msg.ids.append(i)
+        
+        if len(pos_list) < 4:
+            return
+        self.voronoi_pub.publish(msg)
+        
+
+
 
 
 

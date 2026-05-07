@@ -3,10 +3,14 @@ import rclpy, signal
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import PoseStamped
-from armrs_msgs.msg import StateExchange, FleetInformation
+from geometry_msgs.msg import PoseStamped, Polygon, Point32
+
+from armrs_msgs.msg import StateExchange, FleetInformation, VoronoiData
 
 from functools import partial
+
+from shapely.geometry import MultiPoint, Point
+from shapely.geometry import Polygon as ShapelyPolygon
 
 import os
 import numpy as np
@@ -116,6 +120,12 @@ class Computation(Node):
             self.vid_fname = "sim_video.avi"
             self.video_out = video(self.plot_vis.fig, self.vid_fname, self.ROS_RATE)
             self.get_logger().info(f'Initiate saving video into: {self.vid_fname}')
+        
+
+        #VORONOI
+        self.voronoi_sub = self.create_subscription(VoronoiData, "voronoi_data", self.voronoi_callback, 1)
+        self.list_of_robot_id_voronoi = []
+        self.vertices_voronoi_cell = []
 
 
     def time(self):
@@ -143,6 +153,11 @@ class Computation(Node):
     def fleet_callback(self, msg, index):
         ros2py.msg_to_cent_evaluator_data(index, msg, self.evaluator)
 
+    def voronoi_callback(self, msg):
+        self.list_of_robot_id_voronoi = msg.ids
+        self.vertices_voronoi_cell = msg.cells
+        
+
 
     # MAIN LOOP VISUALIZER
     def vis_loop(self):
@@ -157,6 +172,29 @@ class Computation(Node):
         # Update the plot
         elapsed_time = (now - self.start_t)
         self.plot_vis.update(elapsed_time, self.robot_est, self.evaluator)
+
+        ##VORONOI HERE PLEASE :)))))
+        #if len(self.list_of_robot_id_voronoi) > 0:
+        #    i: int = 0
+        #    for id in self.list_of_robot_id_voronoi:
+        #        self.plot_vis.plot_voronoi_cell(id, self.vertices_voronoi_cell[i])
+        #        i += 1
+        
+        if len(self.list_of_robot_id_voronoi) > 0:
+            for i, robot_id in enumerate(self.list_of_robot_id_voronoi):
+                ros_polygon = self.vertices_voronoi_cell[i]
+                
+                # CONVERSION: Extract Point32 objects into a list of [x, y]
+                xy_vertices = []
+                for pt in ros_polygon.points:
+                    xy_vertices.append([pt.x, pt.y])
+                
+                # Convert to numpy array (Matplotlib loves these)
+                vertices_array = np.array(xy_vertices)
+
+                # Only plot if we actually have points
+                if len(vertices_array) > 0:
+                    self.plot_vis.plot_voronoi_cell(robot_id, vertices_array)
 
         # store frame to video
         if VIDEO_OUT: self.video_out.save_image()

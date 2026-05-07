@@ -292,7 +292,7 @@ class PlotVisualizer():
     def plot_density_function(self, grid_points, density_value):
         try: # update existing array and plot
             # HERE ASSUMING THE GRID_POINTS ARE NOT CHANGING
-            self.pl_dens.set_array(density_val)            
+            self.pl_dens.set_array(density_value)            
 
         except: # initiate the first time
             self.pl_dens = self.ax_2D.tripcolor(
