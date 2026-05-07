@@ -102,6 +102,9 @@ class Controller():
         dir_x = estimation_dict.target_point_x - estimation_dict.pos[0]
         dir_y = estimation_dict.target_point_y - estimation_dict.pos[1]
 
+        if dir_x == 0.0 and dir_y == 0.0:
+            return
+
         magnitude = math.sqrt(dir_x**2 + dir_y**2)
         unit_x = 0.0
         unit_y = 0.0

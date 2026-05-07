@@ -15,7 +15,7 @@ class PlotVisualizer():
         # PARAMETER ON VISUALIZATION
         self.SHOW_LIDAR_DETECTION = False
         self.SHOW_COMMUNICATION = False
-        self.SHOW_ROBOT_GOAL = True
+        self.SHOW_ROBOT_GOAL = False
         self.SHOW_ROBOT_ID = True
         self.SHOW_ROBOT_SI_VELOCITY = False
 
@@ -298,25 +298,12 @@ class PlotVisualizer():
     def plot_density_function(self, grid_points, density_value):
         try: # update existing array and plot
             # HERE ASSUMING THE GRID_POINTS ARE NOT CHANGING
-            self.pl_dens.set_data(density_value.reshape(self.density_grid_shape))
+            self.pl_dens.set_array(density_value)
 
         except: # initiate the first time
-            x_grid = np.unique(grid_points[:, 0])
-            y_grid = np.unique(grid_points[:, 1])
-            self.density_grid_shape = (len(y_grid), len(x_grid))
-            density_image = density_value.reshape(self.density_grid_shape)
-
-            self.pl_dens = self.ax_2D.imshow(
-                density_image,
-                extent=[x_grid[0], x_grid[-1], y_grid[0], y_grid[-1]],
-                origin='lower',
-                cmap='viridis',
-                vmin=0,
-                vmax=1,
-                alpha=0.65,
-                interpolation='bilinear',
-                zorder=0,
-            )
+            self.pl_dens = self.ax_2D.tripcolor(
+                grid_points[:,0], grid_points[:,1], density_value, 
+                vmin = 0, vmax = 1, shading='flat')
 
             axins1 = inset_axes(self.ax_2D, width="25%", height="2%", loc='lower right')
             plt.colorbar(self.pl_dens, cax=axins1, orientation='horizontal', ticks=[0, 0.5, 1])

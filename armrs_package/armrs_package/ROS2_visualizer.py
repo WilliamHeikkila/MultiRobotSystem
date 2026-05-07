@@ -174,11 +174,6 @@ class Computation(Node):
         self.plot_vis.update(elapsed_time, self.robot_est, self.evaluator)
 
         ##VORONOI HERE PLEASE :)))))
-        #if len(self.list_of_robot_id_voronoi) > 0:
-        #    i: int = 0
-        #    for id in self.list_of_robot_id_voronoi:
-        #        self.plot_vis.plot_voronoi_cell(id, self.vertices_voronoi_cell[i])
-        #        i += 1
         
         if len(self.list_of_robot_id_voronoi) > 0:
             for i, robot_id in enumerate(self.list_of_robot_id_voronoi):
