@@ -290,16 +290,34 @@ class PlotVisualizer():
             self.ax_2D.add_patch(self.patch_voronoi[id])
 
     def plot_density_function(self, grid_points, density_value):
-        try: # update existing array and plot
-            # HERE ASSUMING THE GRID_POINTS ARE NOT CHANGING
-            self.pl_dens.set_array(density_value)            
+        density_value = np.asarray(density_value)
+        x_unique = np.unique(grid_points[:, 0])
+        y_unique = np.unique(grid_points[:, 1])
 
-        except: # initiate the first time
-            self.pl_dens = self.ax_2D.tripcolor(
-                grid_points[:,0], grid_points[:,1], density_value, 
-                vmin = 0, vmax = 1, shading='flat')
+        if x_unique.size * y_unique.size != density_value.size:
+            # Fallback for irregular grid shapes.
+            try:
+                self.pl_dens.set_array(density_value)
+            except Exception:
+                self.pl_dens = self.ax_2D.tripcolor(
+                    grid_points[:, 0], grid_points[:, 1], density_value,
+                    vmin=0, vmax=1, shading='gouraud')
+            return
+
+        density_grid = density_value.reshape((y_unique.size, x_unique.size))
+
+        if self.pl_dens is None:
+            self.pl_dens = self.ax_2D.imshow(
+                density_grid,
+                origin='lower',
+                extent=[x_unique[0], x_unique[-1], y_unique[0], y_unique[-1]],
+                vmin=0, vmax=1,
+                aspect='auto',
+                cmap='viridis')
 
             axins1 = inset_axes(self.ax_2D, width="25%", height="2%", loc='lower right')
             plt.colorbar(self.pl_dens, cax=axins1, orientation='horizontal', ticks=[0, 0.5, 1])
             axins1.xaxis.set_ticks_position("top")
+        else:
+            self.pl_dens.set_data(density_grid)
 

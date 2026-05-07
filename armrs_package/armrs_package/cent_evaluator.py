@@ -49,7 +49,7 @@ class CentralizedEvaluator():
             field_bounds = self.field_bounds
         
         # Step 1: Generate mesh grid within field bounds
-        grid_step = 0.2
+        grid_step = 0.05
         minx, maxx, miny, maxy = field_bounds[0], field_bounds[1], field_bounds[2], field_bounds[3]
         x_grid = np.arange(minx, maxx + 0.5 * grid_step, grid_step)
         y_grid = np.arange(miny, maxy + 0.5 * grid_step, grid_step)
@@ -60,7 +60,8 @@ class CentralizedEvaluator():
         grid_num = self.grid_roi.shape[0]
         
         # Step 2: Assign custom density based on Gaussian function
-        list_means = [[1, 3.5], [5, 5]]  # Two density peaks
+        ## HERE FOR DENSIRTY FILESD SPOTS
+        list_means = [[0.5,0.5]]
         covariance = np.array([[2, 0], [0, 2]])
         self.density_map = np.zeros(grid_num)
         for mean in list_means:

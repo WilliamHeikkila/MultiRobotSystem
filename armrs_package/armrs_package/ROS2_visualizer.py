@@ -41,10 +41,11 @@ class Computation(Node):
         # Load parameters from yaml file
         param = ParamLoader(param_file)
         scenario = ScenarioLoader(scenario_file)
+        self.param = param
 
         # Initiate visualization for animating the robot movement
         self.plot_vis = PlotVisualizer(param, scenario)
-        self.evaluator = CentralizedEvaluator(scenario)
+        self.evaluator = CentralizedEvaluator(scenario, param)
 
         # OVERWRITE PARAMETERS ON VISUALIZATION
         # By default they all turned on (True)
@@ -196,6 +197,20 @@ class Computation(Node):
                 if len(vertices_array) > 0:
                     self.plot_vis.plot_voronoi_cell(robot_id, vertices_array)
 
+        # Update the plot
+        elapsed_time = (now - self.start_t)
+        field_bounds = [self.param.field_x[0], self.param.field_x[1], self.param.field_y[0], self.param.field_y[1]]
+        self.evaluator.assess(self.robot_est, field_bounds)
+        self.plot_vis.update(elapsed_time, self.robot_est, self.evaluator)
+
+        if getattr(self.evaluator, 'grid_roi', None) is not None and getattr(self.evaluator, 'density_map', None) is not None:
+            self.plot_vis.plot_density_function(self.evaluator.grid_roi, self.evaluator.density_map)
+
+        for robot_id, poly in getattr(self.evaluator, 'voronoi_polygons', {}).items():
+            if poly is not None:
+                pass
+                #self.plot_vis.plot_voronoi_cell(robot_id, poly, face_fill=False)
+        
         # store frame to video
         if VIDEO_OUT: self.video_out.save_image()
 

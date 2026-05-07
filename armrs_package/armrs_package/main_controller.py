@@ -86,43 +86,152 @@ class Controller():
         # Initiate variable to list of in-neighbour
         self.neigh_ids = scenario_dict.get_neigh_ids(robot_ID)
 
-        # TODO
-        # - Store the needed setup from scenario_dict
-        self.current_goal = np.zeros(3) # TODO: e.g., parse from yaml
+        # Default rectangular field bounds when no parameter object is available.
+        self.field_bounds = [-1.0, 8.0, -1.0, 8.0]
 
-
+        self.current_goal = np.zeros(3)
 
     def compute_control_input(self, estimation_dict: Estimation):
-        current_pos = estimation_dict.lahead_pos
+        current_pos = estimation_dict.pos
+        if current_pos is None:
+            estimation_dict.goal = self.current_goal
+            estimation_dict.vel_command = np.zeros(3)
+            return np.zeros(3)
 
-        ## ------------------------------------
-        # CONTROLLER CALCULATION
-        ## ------------------------------------
-        # Compute nominal control # TODO
-        dir_x = estimation_dict.target_point_x - estimation_dict.pos[0]
-        dir_y = estimation_dict.target_point_y - estimation_dict.pos[1]
+        neighbor_positions = []
+        for neigh_id, neigh_data in estimation_dict.neighbours_data.items():
+            neigh_pos = neigh_data.get('pos')
+            if neigh_pos is not None:
+                neighbor_positions.append(neigh_pos[:2])
 
-        magnitude = math.sqrt(dir_x**2 + dir_y**2)
-        unit_x = 0.0
-        unit_y = 0.0
-        if magnitude != 0.0:
-            unit_x = dir_x / (magnitude * 4.0)
-            unit_y = dir_y / (magnitude * 4.0)
-        
-        vx = unit_x
-        vy = unit_y
+        neighbor_positions = np.array(neighbor_positions, dtype=float) if len(neighbor_positions) > 0 else np.empty((0, 2), dtype=float)
 
-        u_nom = np.array([vx, vy, 0.0])
+        target_point = self._compute_density_voronoi_centroid(current_pos[:2], neighbor_positions, self.field_bounds)
+        if target_point is None:
+            target_point = current_pos[:2]
 
-        # Implement safety controller # TODO
-        vel_command = u_nom
+        estimation_dict.target_point_x = target_point[0]
+        estimation_dict.target_point_y = target_point[1]
 
-        # return the resulting control input
-        estimation_dict.goal = self.current_goal
+        dir_vec = target_point - current_pos[:2]
+        magnitude = np.linalg.norm(dir_vec)
+        if magnitude > 1e-6:
+            vel_command_xy = 0.5 * dir_vec
+        else:
+            vel_command_xy = np.zeros(2)
+
+        vel_command = np.array([vel_command_xy[0], vel_command_xy[1], 0.0])
+        estimation_dict.goal = np.array([target_point[0], target_point[1], 0.0])
         estimation_dict.vel_command = vel_command
         return vel_command
 
+    def _compute_density_voronoi_centroid(self, robot_position, neighbor_positions, field_bounds):
+        polygon = self._bounded_voronoi_polygon(robot_position, neighbor_positions, field_bounds)
+        if polygon is None or polygon.shape[0] < 3:
+            return None
+        return self._weighted_polygon_centroid(robot_position, polygon)
 
+    def _bounded_voronoi_polygon(self, robot_position, other_positions, field_bounds):
+        minx, maxx, miny, maxy = field_bounds
+        polygon = np.array([
+            [minx, miny],
+            [maxx, miny],
+            [maxx, maxy],
+            [minx, maxy],
+        ], dtype=float)
+
+        for other_position in other_positions:
+            if np.allclose(robot_position, other_position):
+                continue
+
+            normal = 2 * (other_position - robot_position)
+            limit = np.dot(other_position, other_position) - np.dot(robot_position, robot_position)
+            polygon = self._clip_polygon_halfplane(polygon, normal, limit)
+            if polygon.shape[0] == 0:
+                return None
+
+        return polygon if polygon.shape[0] >= 3 else None
+
+    def _clip_polygon_halfplane(self, polygon, normal, limit):
+        clipped = []
+        eps = 1e-9
+
+        for i, current in enumerate(polygon):
+            previous = polygon[i - 1]
+            current_value = np.dot(normal, current) - limit
+            previous_value = np.dot(normal, previous) - limit
+            current_inside = current_value <= eps
+            previous_inside = previous_value <= eps
+
+            if current_inside != previous_inside:
+                direction = current - previous
+                denominator = np.dot(normal, direction)
+                if abs(denominator) > eps:
+                    t = (limit - np.dot(normal, previous)) / denominator
+                    clipped.append(previous + t * direction)
+
+            if current_inside:
+                clipped.append(current)
+
+        if len(clipped) == 0:
+            return np.empty((0, 2), dtype=float)
+
+        return np.array(clipped, dtype=float)
+
+    def _weighted_polygon_centroid(self, robot_position, polygon):
+        minx, miny = polygon[:, 0].min(), polygon[:, 1].min()
+        maxx, maxy = polygon[:, 0].max(), polygon[:, 1].max()
+        sample_step = 0.2
+        x_vals = np.arange(minx, maxx + sample_step * 0.5, sample_step)
+        y_vals = np.arange(miny, maxy + sample_step * 0.5, sample_step)
+        if x_vals.size == 0 or y_vals.size == 0:
+            return robot_position
+
+        xv, yv = np.meshgrid(x_vals, y_vals)
+        candidate_points = np.column_stack((xv.ravel(), yv.ravel()))
+        inside_mask = self._points_inside_polygon(candidate_points, polygon)
+        if not np.any(inside_mask):
+            return robot_position
+
+        points_in_cell = candidate_points[inside_mask]
+        density = self._density_function(points_in_cell)
+        total_density = np.sum(density)
+        if total_density <= 0:
+            return np.mean(points_in_cell, axis=0)
+
+        centroid = (density[:, None] * points_in_cell).sum(axis=0) / total_density
+        return centroid
+
+    def _density_function(self, points):
+        covariance = np.array([[2.0, 0.0], [0.0, 2.0]])
+        inv_cov = np.linalg.inv(covariance)
+        density = np.zeros(points.shape[0], dtype=float)
+        means = [np.array([1.0, 3.5]), np.array([5.0, 5.0])]
+        for mean in means:
+            diff = points - mean
+            exponent = -0.5 * np.einsum('ij,jk,ik->i', diff, inv_cov, diff)
+            density += np.exp(exponent)
+        max_density = np.max(density) if density.size > 0 else 1.0
+        if max_density > 0:
+            density /= max_density
+        return density
+
+    def _points_inside_polygon(self, points, polygon):
+        x = points[:, 0]
+        y = points[:, 1]
+        inside = np.zeros(points.shape[0], dtype=bool)
+        n = polygon.shape[0]
+
+        for i in range(n):
+            j = (i - 1) % n
+            xi, yi = polygon[i]
+            xj, yj = polygon[j]
+            intersect = ((yi > y) != (yj > y)) & (
+                x < (xj - xi) * (y - yi) / ((yj - yi) + 1e-12) + xi
+            )
+            inside ^= intersect
+
+        return inside
 
     @staticmethod
     def si_to_unicycle(u, theta, ell):
