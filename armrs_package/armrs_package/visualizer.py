@@ -13,11 +13,11 @@ class PlotVisualizer():
     def __init__(self, param_dict, scenario_dict):
 
         # PARAMETER ON VISUALIZATION
-        self.SHOW_LIDAR_DETECTION = True
-        self.SHOW_COMMUNICATION = True
+        self.SHOW_LIDAR_DETECTION = False
+        self.SHOW_COMMUNICATION = False
         self.SHOW_ROBOT_GOAL = True
         self.SHOW_ROBOT_ID = True
-        self.SHOW_ROBOT_SI_VELOCITY = True
+        self.SHOW_ROBOT_SI_VELOCITY = False
 
         # TIME SERIES DATA
         self.SHOW_ROBOT_POS = True
