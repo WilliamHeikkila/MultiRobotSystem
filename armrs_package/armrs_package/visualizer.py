@@ -165,6 +165,11 @@ class PlotVisualizer():
 
     def draw(self, time):
         self.canvas.plot_time(time)
+        try:
+            self.fig.canvas.draw_idle()
+            self.fig.canvas.flush_events()
+        except Exception:
+            pass
         plt.pause(0.000001) # The pause is needed to show the plot
         # plt.pause(0.5) # Slower pause to observe the movement
 
@@ -282,9 +287,10 @@ class PlotVisualizer():
 
         except: # initiate the first time
             fc_col = self.canvas._colorList[id]
-            if face_fill: ec_col = self.canvas._colorList[id]
-            else: ec_col = None
-
+            ec_col = self.canvas._colorList[id]
+            if not face_fill:
+                fc_col = 'none'
+            
             self.patch_voronoi[id] = patches.Polygon(vertices, 
                 alpha=0.5, fc=fc_col, ec=ec_col, fill=face_fill)
             self.ax_2D.add_patch(self.patch_voronoi[id])
@@ -292,14 +298,26 @@ class PlotVisualizer():
     def plot_density_function(self, grid_points, density_value):
         try: # update existing array and plot
             # HERE ASSUMING THE GRID_POINTS ARE NOT CHANGING
-            self.pl_dens.set_array(density_value)            
+            self.pl_dens.set_data(density_value.reshape(self.density_grid_shape))
 
         except: # initiate the first time
-            self.pl_dens = self.ax_2D.tripcolor(
-                grid_points[:,0], grid_points[:,1], density_value, 
-                vmin = 0, vmax = 1, shading='flat')
+            x_grid = np.unique(grid_points[:, 0])
+            y_grid = np.unique(grid_points[:, 1])
+            self.density_grid_shape = (len(y_grid), len(x_grid))
+            density_image = density_value.reshape(self.density_grid_shape)
+
+            self.pl_dens = self.ax_2D.imshow(
+                density_image,
+                extent=[x_grid[0], x_grid[-1], y_grid[0], y_grid[-1]],
+                origin='lower',
+                cmap='viridis',
+                vmin=0,
+                vmax=1,
+                alpha=0.65,
+                interpolation='bilinear',
+                zorder=0,
+            )
 
             axins1 = inset_axes(self.ax_2D, width="25%", height="2%", loc='lower right')
             plt.colorbar(self.pl_dens, cax=axins1, orientation='horizontal', ticks=[0, 0.5, 1])
             axins1.xaxis.set_ticks_position("top")
-
