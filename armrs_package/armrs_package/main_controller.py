@@ -94,28 +94,27 @@ class Controller():
 
     def compute_control_input(self, estimation_dict: Estimation):
         current_pos = estimation_dict.lahead_pos
+        if current_pos is None:
+            return np.zeros(3)
 
         ## ------------------------------------
         # CONTROLLER CALCULATION
         ## ------------------------------------
-        # Compute nominal control # TODO
-        dir_x = estimation_dict.target_point_x - estimation_dict.pos[0]
-        dir_y = estimation_dict.target_point_y - estimation_dict.pos[1]
+        target = np.array([estimation_dict.target_point_x, estimation_dict.target_point_y])
+        error = target - current_pos[:2]
+        distance = np.linalg.norm(error)
 
-        if dir_x == 0.0 and dir_y == 0.0:
-            return
+        if distance < 0.03:
+            return np.zeros(3)
 
-        magnitude = math.sqrt(dir_x**2 + dir_y**2)
-        unit_x = 0.0
-        unit_y = 0.0
-        if magnitude != 0.0:
-            unit_x = dir_x / (magnitude * 4.0)
-            unit_y = dir_y / (magnitude * 4.0)
-        
-        vx = unit_x
-        vy = unit_y
+        gain = 0.45
+        max_speed = 0.25
+        velocity_xy = gain * error
+        speed = np.linalg.norm(velocity_xy)
+        if speed > max_speed:
+            velocity_xy = velocity_xy / speed * max_speed
 
-        u_nom = np.array([vx, vy, 0.0])
+        u_nom = np.array([velocity_xy[0], velocity_xy[1], 0.0])
 
         # Implement safety controller # TODO
         vel_command = u_nom

@@ -1,19 +1,19 @@
 from launch import LaunchDescription, actions
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
 from datetime import datetime
 import yaml
+import os
 
 # PACKAGE AND NODE INFO
 MRS_PKG = 'armrs_package'
 MRS_NAMESPACE = 'mrs'
 
 # YAML TO PARSE
-src_path = "/home/william/ros2_ws_open/src/" # TODO: Fix this to absolute src path in your setup
-yaml_path = src_path + MRS_PKG + "/" + MRS_PKG + "/" 
-
-param_file = yaml_path + "sim_setup.yaml" # TODO: Simulation parameter & environment setting
-scenario_file = yaml_path + "scenario_demo_1formation.yaml" # TODO: robot and controller parameter
-# scenario_file = yaml_path + "scenario_demo_2formation.yaml" # TODO: robot and controller parameter
+config_path = os.path.join(get_package_share_directory(MRS_PKG), "config")
+param_file = os.path.join(config_path, "sim_setup.yaml")
+scenario_file = os.path.join(config_path, "scenario_demo_1formation.yaml")
+# scenario_file = os.path.join(config_path, "scenario_demo_2formation.yaml")
 
 # EXTRACT LIST OF ROBOT
 with open(scenario_file, 'r') as stream:

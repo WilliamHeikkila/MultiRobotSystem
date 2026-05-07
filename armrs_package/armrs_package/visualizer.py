@@ -292,18 +292,37 @@ class PlotVisualizer():
                 fc_col = 'none'
             
             self.patch_voronoi[id] = patches.Polygon(vertices, 
-                alpha=0.5, fc=fc_col, ec=ec_col, fill=face_fill)
+                alpha=0.5, fc=fc_col, ec=ec_col, fill=face_fill, zorder=2)
             self.ax_2D.add_patch(self.patch_voronoi[id])
 
     def plot_density_function(self, grid_points, density_value):
+        x_values = np.unique(grid_points[:, 0])
+        y_values = np.unique(grid_points[:, 1])
+        density_grid = density_value.reshape(len(y_values), len(x_values))
+
         try: # update existing array and plot
-            # HERE ASSUMING THE GRID_POINTS ARE NOT CHANGING
-            self.pl_dens.set_array(density_value)
+            self.pl_dens.set_data(density_grid)
 
         except: # initiate the first time
-            self.pl_dens = self.ax_2D.tripcolor(
-                grid_points[:,0], grid_points[:,1], density_value, 
-                vmin = 0, vmax = 1, shading='flat')
+            cell_size_x = x_values[1] - x_values[0] if len(x_values) > 1 else 1.0
+            cell_size_y = y_values[1] - y_values[0] if len(y_values) > 1 else 1.0
+            extent = [
+                x_values[0] - 0.5 * cell_size_x,
+                x_values[-1] + 0.5 * cell_size_x,
+                y_values[0] - 0.5 * cell_size_y,
+                y_values[-1] + 0.5 * cell_size_y,
+            ]
+
+            self.pl_dens = self.ax_2D.imshow(
+                density_grid,
+                extent=extent,
+                origin='lower',
+                vmin=0,
+                vmax=1,
+                interpolation='bilinear',
+                alpha=0.35,
+                zorder=0,
+                cmap='viridis')
 
             axins1 = inset_axes(self.ax_2D, width="25%", height="2%", loc='lower right')
             plt.colorbar(self.pl_dens, cax=axins1, orientation='horizontal', ticks=[0, 0.5, 1])

@@ -10,10 +10,6 @@ from functools import partial
 
 import os
 import numpy as np
-import shapely
-from shapely.geometry import MultiPoint, Point
-from shapely.geometry import Polygon as ShapelyPolygon
-from shapely.plotting import plot_polygon
 
 from .yaml_loader import ParamLoader, ScenarioLoader
 from .visualizer import PlotVisualizer
@@ -45,7 +41,7 @@ class Computation(Node):
         for id in scenario.list_robot_ID:
             self.robot_est[id] = Estimation(id, param)
         # Initiate the fleet evaluator
-        self.evaluator = CentralizedEvaluator(scenario)
+        self.evaluator = CentralizedEvaluator(scenario, param)
 
         # DEFINE SUBSCRIBER
         for robot_index in scenario.list_robot_ID:
@@ -104,8 +100,6 @@ class Computation(Node):
         # update to estimation
         self.robot_est[index].update_state_reading( np.array([pos.x, pos.y, 0]), yaw )
 
-        self.calculate_voronoi()
-
     def state_callback(self, msg, index):
         pass
         # TODO: pass for now
@@ -141,56 +135,33 @@ class Computation(Node):
     
     
     def calculate_voronoi(self):
-        #Define Boundary
-        boundary_coords = [[-0.2, -1.0], [-0.2, 7.2], [7.0, 7.2], [7.0, -1.0]]
-        bound_poly = ShapelyPolygon(boundary_coords)
-        
-        extension_box = bound_poly.buffer(2.0).envelope 
-
-        active_robot_ids = []
-        pos_list = []
-
-        for robot_id, data in self.robot_est.items():
-            if data.pos is not None:
-                pos_list.append([float(data.pos[0]), float(data.pos[1])])
-                active_robot_ids.append(robot_id)
-
-        if len(pos_list) < 2:
+        if len([data for data in self.robot_est.values() if data.lahead_pos is not None]) < 2:
             return
 
-        points = np.asarray(pos_list, dtype=np.float32)
         msg = VoronoiData()
 
         try:
-            #Generate Voronoi extended to the larger box
-            vor_ori = shapely.voronoi_polygons(
-                MultiPoint(points), 
-                extend_to=extension_box, 
-                ordered=True
-            )
+            if not self.evaluator.voronoi_polygons:
+                self.evaluator.assess(self.robot_est)
 
-            #Process each cell
-            for i, vor_poly in enumerate(vor_ori.geoms):
-                cell_shape = vor_poly.intersection(bound_poly)
-                
-                if cell_shape.is_empty:
+            for robot_id in self.list_of_robot_id_voronoi:
+                vertices = self.evaluator.voronoi_polygons.get(robot_id)
+                if vertices is None or len(vertices) == 0:
                     continue
+
                 ros_poly = Polygon()
-                if hasattr(cell_shape, 'exterior'):
-                    for x, y in cell_shape.exterior.coords:
-                        ros_poly.points.append(Point32(x=float(x), y=float(y), z=0.0))
-                
-                robot_id = active_robot_ids[i]
+                for x, y in vertices:
+                    ros_poly.points.append(Point32(x=float(x), y=float(y), z=0.0))
+
                 msg.ids.append(robot_id)
                 msg.cells.append(ros_poly)
 
-                #Calculate Centroid
-                centroid = cell_shape.centroid
-                msg.target_x.append(float(centroid.x))
-                msg.target_y.append(float(centroid.y))
+                target = self.evaluator.weighted_com.get(robot_id)
+                if target is None:
+                    target = np.mean(vertices, axis=0)
 
-                self.robot_est[robot_id].target_pos_x = float(centroid.x)
-                self.robot_est[robot_id].target_pos_y = float(centroid.y)
+                msg.target_x.append(float(target[0]))
+                msg.target_y.append(float(target[1]))
 
             self.voronoi_pub.publish(msg)
 

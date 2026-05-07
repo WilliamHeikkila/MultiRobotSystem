@@ -9,9 +9,6 @@ from armrs_msgs.msg import StateExchange, FleetInformation, VoronoiData
 
 from functools import partial
 
-from shapely.geometry import MultiPoint, Point
-from shapely.geometry import Polygon as ShapelyPolygon
-
 import os
 import numpy as np
 from .yaml_loader import ParamLoader, ScenarioLoader
@@ -44,7 +41,7 @@ class Computation(Node):
 
         # Initiate visualization for animating the robot movement
         self.plot_vis = PlotVisualizer(param, scenario)
-        self.evaluator = CentralizedEvaluator(scenario)
+        self.evaluator = CentralizedEvaluator(scenario, param)
 
         # OVERWRITE PARAMETERS ON VISUALIZATION
         # By default they all turned on (True)
@@ -171,6 +168,12 @@ class Computation(Node):
 
         # Update the plot
         elapsed_time = (now - self.start_t)
+
+        if any(est.lahead_pos is not None for est in self.robot_est.values()):
+            self.evaluator.assess(self.robot_est)
+            if self.evaluator.grid_roi is not None and self.evaluator.density_map is not None:
+                self.plot_vis.plot_density_function(self.evaluator.grid_roi, self.evaluator.density_map)
+
         self.plot_vis.update(elapsed_time, self.robot_est, self.evaluator)
 
         ##VORONOI HERE PLEASE :)))))
