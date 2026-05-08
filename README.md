@@ -1,8 +1,9 @@
+## Setup
 USE "working" BRANCH!
 
 Clone into workspace folder, rename repo folder to src
 
-To run:
+## To run:
 
 cd TO YOUR WORKSPACE
 
