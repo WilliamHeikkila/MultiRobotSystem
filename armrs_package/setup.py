@@ -15,7 +15,7 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*.py'))),
         (os.path.join('share', package_name, 'config'), glob(os.path.join(package_name, '*.yaml'))),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'shapely'],
     zip_safe=True,
     maintainer='mwatma',
     maintainer_email='8626150+mwsatman@users.noreply.github.com',

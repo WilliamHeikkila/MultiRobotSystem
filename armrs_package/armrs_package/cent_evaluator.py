@@ -17,14 +17,14 @@ class CentralizedEvaluator():
         for f_id in self.form_ids:
             self.form_cent[f_id] = None
 
-        # Store grid, density, and Voronoi data for visualization
+        # Store density grid and Shapely Voronoi outputs for visualization/control
         self.grid_roi = None
         self.density_map = None
-        self.voronoi_cells = {}  # robot_id -> indices of mesh points in that cell
         self.weighted_com = {}  # per-robot weighted center of mass
-        self.vor = None
-        self.cell_assignment = None  # robot id assigned to each mesh point
         self.voronoi_polygons = {}  # robot_id -> Nx2 array of polygon vertices
+        self.grid_step = 0.05
+        self.density_means = [[0.1, 0.1], [5, 5]]
+        self.density_covariance = np.array([[2, 0], [0, 2]])
 
         # Field bounds for density grid: prefer ParamLoader values when provided
         if param is not None:
@@ -39,16 +39,21 @@ class CentralizedEvaluator():
     def assess(self, robot_est_dict, field_bounds=None):
         """
         Assess fleet and compute weighted centroids based on non-uniform density Voronoi coverage.
-        
+
         Args:
             robot_est_dict: dict of Estimation objects
             field_bounds: [xmin, xmax, ymin, ymax] defaults to [-1, 8, -1, 8]
         """
         if field_bounds is None:
             field_bounds = self.field_bounds
-        
-        # Step 1: Generate mesh grid within field bounds
-        grid_step = 0.05
+
+        self.field_bounds = field_bounds
+        self._build_density_map(field_bounds)
+        self.update_formation_centroids(robot_est_dict)
+
+    def _build_density_map(self, field_bounds):
+        """Generate the density grid used for non-uniform coverage."""
+        grid_step = self.grid_step
         minx, maxx, miny, maxy = field_bounds[0], field_bounds[1], field_bounds[2], field_bounds[3]
         x_grid = np.arange(minx, maxx + 0.5 * grid_step, grid_step)
         y_grid = np.arange(miny, maxy + 0.5 * grid_step, grid_step)
@@ -56,25 +61,22 @@ class CentralizedEvaluator():
         y_grid = y_grid[y_grid <= maxy]
         gx, gy = np.meshgrid(x_grid, y_grid)
         self.grid_roi = np.column_stack((gx.ravel(), gy.ravel()))
-        grid_num = self.grid_roi.shape[0]
-        
-        # Step 2: Assign custom density based on Gaussian function
-        list_means = [[0.1, 0.1], [5, 5]]  # Two density peaks
-        covariance = np.array([[2, 0], [0, 2]])
-        self.density_map = np.zeros(grid_num)
-        for mean in list_means:
-            self.density_map += self._gaussian_density(self.grid_roi, mean, covariance)
+
+        self.density_map = self.evaluate_density(self.grid_roi)
         max_density = np.max(self.density_map)
         if max_density > 0:
             self.density_map = self.density_map / max_density  # normalize to max=1
-        
-        # Step 3: Assign mesh points to bounded Voronoi cells
-        self._compute_voronoi_cells(robot_est_dict, field_bounds)
-        
-        # Step 4: Compute weighted centroids per robot in their Voronoi cell
-        self._compute_weighted_centroids_per_robot(grid_step)
-        
-        # Step 5: Update formation centroids as average of member robot weighted COMs
+
+    def evaluate_density(self, points):
+        """Evaluate the configured non-uniform density function at grid points."""
+        points = np.asarray(points)
+        density = np.zeros(points.shape[0])
+        for mean in self.density_means:
+            density += self._gaussian_density(points, mean, self.density_covariance)
+        return density
+
+    def update_formation_centroids(self, robot_est_dict):
+        """Update formation centroids from weighted COMs when they are available."""
         for f_id in self.form_ids:
             ids = self.form_ids[f_id]
             valid_coms = [self.weighted_com[i] for i in ids if i in self.weighted_com and self.weighted_com[i] is not None]
@@ -100,113 +102,46 @@ class CentralizedEvaluator():
         exponent = -0.5 * np.einsum('ij,jk,ik->i', diff, inv_cov, diff)
         return np.exp(exponent)
 
-    def _compute_voronoi_cells(self, robot_est_dict, field_bounds):
-        """Assign mesh points to each robot's bounded Voronoi cell."""
-        self.voronoi_cells = {}
+    def reset_voronoi_results(self):
+        """Clear Voronoi outputs before recomputing Shapely cells."""
         self.voronoi_polygons = {}
         self.weighted_com = {}
-        self.cell_assignment = None
-        self.vor = None
 
-        # Collect all robot positions (use lahead if available)
-        robot_positions = []
-        robot_ids_valid = []
-        for robot_id in self.list_ID:
-            robot_est = robot_est_dict.get(robot_id)
-            if robot_est is not None and robot_est.lahead_pos is not None:
-                robot_positions.append(robot_est.lahead_pos[:2])  # x, y only
-                robot_ids_valid.append(robot_id)
-        
-        if len(robot_positions) == 0:
-            return
-        
-        robot_positions = np.array(robot_positions)
+    def weighted_centroid_for_cell(self, cell_shape):
+        """Compute numerical density-weighted COM inside one Shapely Voronoi cell."""
+        if cell_shape is None or cell_shape.is_empty:
+            return None
+        if self.grid_roi is None or self.density_map is None:
+            return None
 
-        # Discrete Voronoi: each mesh point belongs to the nearest robot.
-        distances = np.linalg.norm(
-            self.grid_roi[:, None, :] - robot_positions[None, :, :],
-            axis=2,
+        in_cell = self._grid_points_in_convex_cell(cell_shape)
+        if not np.any(in_cell):
+            return None
+
+        points_in_cell = self.grid_roi[in_cell]
+        density_in_cell = self.density_map[in_cell]
+        density_sum = np.sum(density_in_cell)
+        if density_sum <= 0:
+            return None
+
+        com = (density_in_cell @ points_in_cell) / density_sum
+        return np.array([com[0], com[1], 0])
+
+    def _grid_points_in_convex_cell(self, cell_shape):
+        """Return a mask for grid points inside a bounded convex Shapely cell."""
+        vertices = np.asarray(cell_shape.exterior.coords[:-1], dtype=float)
+        if vertices.shape[0] < 3:
+            return np.zeros(self.grid_roi.shape[0], dtype=bool)
+
+        edges = np.roll(vertices, -1, axis=0) - vertices
+        rel_points = self.grid_roi[:, None, :] - vertices[None, :, :]
+        crosses = edges[None, :, 0] * rel_points[:, :, 1] - edges[None, :, 1] * rel_points[:, :, 0]
+
+        signed_area = 0.5 * np.sum(
+            vertices[:, 0] * np.roll(vertices[:, 1], -1)
+            - np.roll(vertices[:, 0], -1) * vertices[:, 1]
         )
-        nearest_robot_idx = np.argmin(distances, axis=1)
-        self.cell_assignment = np.array(
-            [robot_ids_valid[i] for i in nearest_robot_idx],
-            dtype=int,
-        )
-
-        for i, robot_id in enumerate(robot_ids_valid):
-            self.voronoi_cells[robot_id] = np.where(nearest_robot_idx == i)[0]
-            self.voronoi_polygons[robot_id] = self._bounded_voronoi_polygon(
-                robot_positions[i],
-                np.delete(robot_positions, i, axis=0),
-                field_bounds,
-            )
-
-    def _bounded_voronoi_polygon(self, robot_position, other_positions, field_bounds):
-        """Clip the rectangular field by pairwise nearest-neighbour half-planes."""
-        minx, maxx, miny, maxy = field_bounds
-        polygon = np.array([
-            [minx, miny],
-            [maxx, miny],
-            [maxx, maxy],
-            [minx, maxy],
-        ], dtype=float)
-
-        for other_position in other_positions:
-            if np.allclose(robot_position, other_position):
-                continue
-
-            normal = 2 * (other_position - robot_position)
-            limit = np.dot(other_position, other_position) - np.dot(robot_position, robot_position)
-            polygon = self._clip_polygon_halfplane(polygon, normal, limit)
-            if polygon.shape[0] == 0:
-                return None
-
-        return polygon if polygon.shape[0] >= 3 else None
-
-    def _clip_polygon_halfplane(self, polygon, normal, limit):
-        """Sutherland-Hodgman clipping for normal dot point <= limit."""
-        clipped = []
         eps = 1e-9
-
-        for i, current in enumerate(polygon):
-            previous = polygon[i - 1]
-            current_value = np.dot(normal, current) - limit
-            previous_value = np.dot(normal, previous) - limit
-            current_inside = current_value <= eps
-            previous_inside = previous_value <= eps
-
-            if current_inside != previous_inside:
-                direction = current - previous
-                denominator = np.dot(normal, direction)
-                if abs(denominator) > eps:
-                    t = (limit - np.dot(normal, previous)) / denominator
-                    clipped.append(previous + t * direction)
-
-            if current_inside:
-                clipped.append(current)
-
-        if len(clipped) == 0:
-            return np.empty((0, 2))
-
-        return np.array(clipped)
-
-    def _compute_weighted_centroids_per_robot(self, grid_step):
-        """Compute weighted center of mass for each robot in its Voronoi cell."""
-        for robot_id, cell_indices in self.voronoi_cells.items():
-            if cell_indices is None or len(cell_indices) == 0:
-                self.weighted_com[robot_id] = None
-                continue
-            
-            try:
-                density_in_cell = self.density_map[cell_indices]
-                points_in_cell = self.grid_roi[cell_indices]
-                density_sum = np.sum(density_in_cell)
-
-                if density_sum > 0:
-                    com = (density_in_cell @ points_in_cell) / density_sum
-                    self.weighted_com[robot_id] = np.array([com[0], com[1], 0])
-                else:
-                    self.weighted_com[robot_id] = None
-            except Exception as e:
-                print(f"Error computing weighted COM for robot {robot_id}: {e}")
-                self.weighted_com[robot_id] = None
+        if signed_area >= 0:
+            return np.all(crosses >= -eps, axis=1)
+        return np.all(crosses <= eps, axis=1)
